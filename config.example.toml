@@ -1,0 +1,31 @@
+# Copy to ~/.config/polyvoice/config.toml and edit.
+
+[tts]
+backend = "cosyvoice3"
+port = 7891
+default_voice = "f1"
+
+[tts.backends.cosyvoice3]
+venv = "venvs/cosyvoice"
+model_path = "/mnt/wsl/PHYSICALDRIVE1p2/projects/polyvoice/models/Fun-CosyVoice3-0.5B-2512"
+fp16 = true
+voices_dir = "~/.config/polyvoice/voices"  # zero-shot prompt wavs live here
+
+[tts.backends.edge_tts]
+# Cloud fallback; no venv needed beyond the base.
+default_voice = "zh-CN-XiaoxiaoNeural"
+
+[stt]
+backend = "sensevoice"
+port = 7892
+hotwords_file = "vocab/adapters/sensevoice.txt"
+
+[stt.backends.sensevoice]
+venv = "venvs/sensevoice"
+model_path = "/mnt/wsl/PHYSICALDRIVE1p2/projects/polyvoice/models/SenseVoiceSmall-onnx-fp16"
+device = "cuda"
+
+[voice_mode]
+flag_file = "~/.config/polyvoice/active"
+max_tts_chars = 400
+summarize_model = "claude-haiku-4-5"

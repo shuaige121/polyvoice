@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venvs/
+.env
+.env.*
+!.env.example
+
+# Models & weights
+models/
+pretrained_models/
+*.pt
+*.pth
+*.safetensors
+*.onnx
+*.bin
+*.gguf
+
+# Audio artifacts
+*.wav
+*.mp3
+*.flac
+*.ogg
+!assets/*.wav
+
+# Vocab runtime state
+vocab/sources/
+vocab/state.json
+vocab/master.jsonl
+vocab/corrections.jsonl
+vocab/adapters/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs
+logs/
+*.log
