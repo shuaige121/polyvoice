@@ -26,6 +26,7 @@ dev = ["ruff", "pytest", "pytest-asyncio"]
 polyvoice-tts = "polyvoice.server.tts:main"
 polyvoice-stt = "polyvoice.server.stt:main"
 polyvoice-vocab = "polyvoice.vocab.cli:main"
+polyvoice = "polyvoice.voice_mode:main"
 say-zh = "polyvoice.clients.say_zh:main"
 
 [build-system]
