@@ -184,12 +184,17 @@ src/polyvoice/backends/stt/sensevoice.py
 src/polyvoice/backends/stt/faster_whisper.py
 src/polyvoice/backends/stt/worker_entry.py
 src/polyvoice/vocab/scan.py               # walks ~/.claude/projects, extracts text
-src/polyvoice/vocab/extract.py            # parallel Sonnet agents → phrases
-src/polyvoice/vocab/merge.py              # dedupe into master.jsonl
+src/polyvoice/vocab/extract.py            # deterministic jieba + rarity candidate extraction
+src/polyvoice/vocab/secrets.py            # local denylist and redaction helpers
+src/polyvoice/vocab/heuristic_curate.py   # deterministic curation mode
+src/polyvoice/vocab/ime_import.py         # Rime/plain-text dictionary import
+src/polyvoice/vocab/merge.py              # dedupe curated/manual entries into master.jsonl
 src/polyvoice/vocab/adapters.py           # per-backend generators
-src/polyvoice/vocab/cli.py                # `polyvoice-vocab scan|extract|gen` commands
+src/polyvoice/vocab/cli.py                # `polyvoice-vocab scan|candidates|curate|merge|gen|build`
+skills/polyvoice-vocab-curate/SKILL.md
+vocab/curation_prompt.md
 venvs/sensevoice/requirements.txt          # sherpa-onnx, numpy, soundfile
-tests/test_vocab_merge.py
+tests/test_vocab_*.py
 tests/test_stt_roundtrip.py
 ```
 
@@ -218,62 +223,94 @@ Response 200:
 
 ### Vocab pipeline
 
+There are three curation modes:
+
+- `heuristic`: deterministic and default for CI/headless use.
+- `skill`: interactive Claude Code wrapper. The contract is `vocab/curation_prompt.md` plus `vocab/candidates.jsonl`.
+- `llm`: reserved for a later implementation.
+
+`vocab/manual.jsonl` always wins over generated curation. `master.jsonl` uses `schema_version: 1`.
+
 #### scan.py
 
 ```
-polyvoice-vocab scan [--since SESSION_ID] [--out sources/claude-scan-<date>.jsonl]
+polyvoice-vocab scan [--out vocab/sources/scan-<date>.jsonl]
 ```
 
 - Walks `~/.claude/projects/*/*.jsonl`, reads every line as JSON.
-- Extracts `message.content` where `role in ("user", "assistant")`.
-- Output: JSONL of `{session_id, role, text, ts}`.
-- `--since`: resume from `state.json.last_scan_session_id`.
+- Extracts only `role=user`, `type=text` content.
+- Strips system tags, fenced and inline code, URLs, paths, and secret-like values.
+- Skips messages with JSON-key density >=3 or cleaned length >600.
+- Output: JSONL of `{session_id, role, type, text, ts, source}`.
 
 #### extract.py
 
 ```
-polyvoice-vocab extract [--input sources/...] [--parallel 5] [--model claude-sonnet-4-6]
+polyvoice-vocab candidates --input vocab/sources/scan-<date>.jsonl
 ```
 
-- Shards input by session (batch 20 sessions per agent).
-- For each shard, calls Anthropic API with a directive prompt:
-  ```
-  You extract domain vocabulary from user/assistant messages for ASR hotword biasing.
-  Return ONLY JSON array. For each phrase output {"phrase": str, "lang": "zh"|"en"|"mixed", "category": "library"|"command"|"project"|"person"|"acronym"|"domain"}.
-  Include: library/framework names, CLI commands, project codenames, file path fragments, acronyms (MOM, MOH, RAG), Chinese proper nouns, dictionary-rare technical terms.
-  Exclude: common words, numbers, URLs, email addresses.
-  ```
-- Parallel via `asyncio.gather` (N workers).
-- Output: `sources/phrases-<date>.jsonl`.
+- Tokenizes scanned text with `jieba.lcut`.
+- Scores candidates with `tf * (8 - zipf_zh|en)`.
+- Applies a 1.5x bonus to CamelCase/acronym terms.
+- Drops common terms with Zipf >=4.5.
+- Writes canonical `vocab/candidates.jsonl`.
+- Writes `vocab/candidates_review.md`, a markdown table grouped by language and score band.
+- Snippets are capped at 80 chars and redacted.
+
+`polyvoice-vocab extract` remains a legacy alias for `candidates`.
+
+#### secrets.py
+
+- Denies `cfat_`, `sk-`, GitHub tokens, JWTs beginning `eyJ`, 32-64 char hex hashes, UUIDs, IPs, base64-looking blobs, URLs, emails, and env-var-like secret names.
+- Provides `is_secret(term)` and `redact(text)`.
+
+#### heuristic_curate.py
+
+```
+polyvoice-vocab curate --mode heuristic --input vocab/candidates.jsonl
+```
+
+- Drops secrets, too-short terms, too-long terms, paths, and non-vocabulary fragments.
+- Categorizes CamelCase as `library`, all-caps short forms as `acronym`, Chinese terms as `domain`, and digit+underscore identifiers as `id`.
+- Outputs curated JSONL under `vocab/sources/curated-<date>.jsonl`.
+
+#### ime_import.py
+
+```
+polyvoice-vocab ime-import --txt userdb.txt --txt dict.txt
+```
+
+- Parses Rime `userdb.txt` exports and plain-text dictionaries.
+- Refuses `.scel`; binary Sogou parsing is intentionally not supported.
+- Appends high-weight `source="ime"` candidates to `vocab/candidates.jsonl`.
 
 #### merge.py
 
-- Reads all `sources/*.jsonl` + `manual.txt`.
+- Reads curated JSONL plus `vocab/manual.jsonl`.
 - Dedupes by normalized phrase (lowercase for en, exact for zh).
-- Updates `master.jsonl`:
-  - New entry: set `first_seen`, `count=1`, `sources=[input_file]`.
-  - Existing: increment `count`, extend `sources`, merge `aliases`.
-- Computes `weight`: `min(1.0 + log10(count), 3.0)`.
+- Accumulates `count`, `first_seen`, `last_seen`, `sources`, and `aliases`.
+- Computes `weight` as `min(1.0 + log10(count), 3.0)`.
+- Manual entries override generated category, phrase, aliases, and notes.
 
 #### adapters.py
 
 Generates:
-- `adapters/sensevoice.txt` — one phrase per line (sherpa-onnx format).
+- `adapters/sensevoice.txt` — one phrase per line.
 - `adapters/sherpa_onnx.txt` — `<phrase> :<weight>` per line.
 - `adapters/capswriter_hot_en.txt` — English only (CapsWriter split).
 - `adapters/capswriter_hot_zh.txt` — Chinese only.
 - `adapters/capswriter_hot_rule.txt` — from `aliases` field (format `<alias>\t<phrase>`).
+- Validates phrase length and dedupes.
 
 ### Phase 2 verification
 
 ```bash
 # Vocab end-to-end
-polyvoice-vocab scan --out /tmp/scan.jsonl
-polyvoice-vocab extract --input /tmp/scan.jsonl --parallel 3
-polyvoice-vocab merge
-polyvoice-vocab gen
-ls vocab/adapters/                         # all four files present
+uv run pytest -q
+polyvoice-vocab build
+head vocab/candidates_review.md
 head vocab/master.jsonl
+ls vocab/adapters/
 
 # STT smoke
 uv run polyvoice-stt &                     # :7892

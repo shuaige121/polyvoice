@@ -8,7 +8,7 @@ from polyvoice.vocab.merge import merge
 def test_vocab_merge_and_adapters(tmp_path: Path) -> None:
     sources = tmp_path / "sources"
     sources.mkdir()
-    (sources / "phrases.jsonl").write_text(
+    (sources / "curated-test.jsonl").write_text(
         "\n".join(
             [
                 json.dumps({"phrase": "CosyVoice3", "lang": "en", "category": "library"}),
@@ -20,10 +20,19 @@ def test_vocab_merge_and_adapters(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    (tmp_path / "manual.jsonl").write_text(
+        json.dumps({"phrase": "RAG", "lang": "en", "category": "domain", "aliases": ["retrieval augmented generation"]})
+        + "\n",
+        encoding="utf-8",
+    )
     assert merge(tmp_path) == 3
     rows = [json.loads(line) for line in (tmp_path / "master.jsonl").read_text(encoding="utf-8").splitlines()]
     cosy = next(item for item in rows if item["phrase"] == "CosyVoice3")
     assert cosy["count"] == 2
+    assert cosy["schema_version"] == 1
+    rag = next(item for item in rows if item["phrase"] == "RAG")
+    assert rag["category"] == "domain"
+    assert rag["manual"] is True
     files = generate(tmp_path)
     assert files["sensevoice"].exists()
     assert "CosyVoice3" in files["sherpa_onnx"].read_text(encoding="utf-8")
