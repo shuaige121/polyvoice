@@ -13,4 +13,9 @@ snapshot_download(
     local_dir="models/Fun-CosyVoice3-0.5B-2512",
     local_dir_use_symlinks=False,
 )
+snapshot_download(
+    repo_id="ruska1117/SenseVoiceSmall-onnx-fp16",
+    local_dir="models/SenseVoiceSmall-onnx-fp16",
+    local_dir_use_symlinks=False,
+)
 PY

@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.7",
     "httpx>=0.27",
     "numpy>=1.26",
+    "python-multipart>=0.0.9",
     "tomli>=2.0; python_version < '3.11'",
 ]
 
@@ -24,6 +25,7 @@ dev = ["ruff", "pytest", "pytest-asyncio"]
 [project.scripts]
 polyvoice-tts = "polyvoice.server.tts:main"
 polyvoice-stt = "polyvoice.server.stt:main"
+polyvoice-vocab = "polyvoice.vocab.cli:main"
 say-zh = "polyvoice.clients.say_zh:main"
 
 [build-system]

@@ -1,0 +1,2 @@
+{"session_id":"synthetic-1","role":"user","text":"Please deploy the Kubernetes pod and check CosyVoice3 latency.","ts":"2026-01-01T00:00:00Z"}
+{"session_id":"synthetic-1","role":"assistant","text":"Use uv run pytest and inspect the RAG pipeline.","ts":"2026-01-01T00:00:01Z"}
