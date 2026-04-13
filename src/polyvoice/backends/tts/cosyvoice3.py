@@ -56,6 +56,14 @@ class CosyVoice3Backend:
     def _load_engine(self) -> None:
         if bool(self.options.get("force_cpu", False)):
             os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        else:
+            # Force CUDA context init before transformers/triton imports.
+            # Without this, triton 3.3+ on WSL2 + Blackwell raises
+            # "0 active drivers ([])" during transformers.modeling_utils import.
+            import torch  # noqa: PLC0415
+
+            if torch.cuda.is_available():
+                torch.cuda.init()
         third_party = ROOT / "third_party/CosyVoice"
         if third_party.exists():
             sys.path.insert(0, str(third_party))
