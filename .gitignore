@@ -4,7 +4,11 @@ __pycache__/
 *$py.class
 *.egg-info/
 .venv/
-venvs/
+!venvs/
+venvs/*
+!venvs/*/
+venvs/*/*
+!venvs/*/requirements.txt
 .env
 .env.*
 !.env.example
@@ -25,6 +29,10 @@ pretrained_models/
 *.flac
 *.ogg
 !assets/*.wav
+!assets/voices/*.wav
+
+# Third-party source checkouts
+third_party/
 
 # Vocab runtime state
 vocab/sources/
