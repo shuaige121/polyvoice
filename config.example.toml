@@ -9,10 +9,12 @@ default_voice = "f1"
 venv = "venvs/cosyvoice"
 model_path = "/mnt/wsl/PHYSICALDRIVE1p2/projects/polyvoice/models/Fun-CosyVoice3-0.5B-2512"
 fp16 = true
+force_cpu = false
 voices_dir = "~/.config/polyvoice/voices"  # zero-shot prompt wavs live here
 
 [tts.backends.edge_tts]
-# Cloud fallback; no venv needed beyond the base.
+# Cloud fallback backend venv.
+venv = "venvs/edge-tts"
 default_voice = "zh-CN-XiaoxiaoNeural"
 
 [stt]

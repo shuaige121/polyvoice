@@ -18,9 +18,13 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["ruff", "pytest", "pytest-asyncio"]
 
+[dependency-groups]
+dev = ["ruff", "pytest", "pytest-asyncio"]
+
 [project.scripts]
 polyvoice-tts = "polyvoice.server.tts:main"
 polyvoice-stt = "polyvoice.server.stt:main"
+say-zh = "polyvoice.clients.say_zh:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -32,3 +36,6 @@ packages = ["src/polyvoice"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
