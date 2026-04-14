@@ -7,7 +7,7 @@ import logging
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread
 from PySide6.QtWidgets import QApplication, QDialog
 
 from polyvoice_app import config as config_module
@@ -18,24 +18,11 @@ from polyvoice_app.paste import paste_text
 from polyvoice_app.recorder import MicSelection, Recorder
 from polyvoice_app.settings_gui import SettingsWindow
 from polyvoice_app.stt import STTConfig, STTEngine, STTNotReadyError
+from polyvoice_app.tts_client import TTSClient
 from polyvoice_app.tray import TrayController, TrayStatus
 from polyvoice_app.wizard import SetupWizard
 
 logger = logging.getLogger("polyvoice.main")
-
-
-class VocabWorker(QObject):
-    finished = Signal()
-    failed = Signal(str)
-
-    @Slot()
-    def run(self) -> None:
-        try:
-            vocab.refresh_from_wsl()
-        except Exception as exc:  # noqa: BLE001
-            self.failed.emit(str(exc))
-        else:
-            self.finished.emit()
 
 
 class AppRuntime(QObject):
@@ -160,11 +147,16 @@ class AppRuntime(QObject):
         self._on_config_changed()
 
     def _reconnect_wsl(self) -> None:
-        self.tray.show_message("polyvoice", "Reconnect WSL requested. Phase 3 will wire the WSL probe.")
+        try:
+            distros = vocab.enumerate_wsl_distros()
+        except Exception as exc:  # noqa: BLE001
+            self.tray.show_message("polyvoice", f"WSL unavailable: {exc}", error=True)
+            return
+        self.tray.show_message("polyvoice", f"Detected WSL: {', '.join(distros) or 'none'}")
 
     def refresh_vocab(self) -> None:
         thread = QThread(self)
-        worker = VocabWorker()
+        worker = vocab.VocabScanWorker()
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.finished.connect(lambda: self.tray.set_state("idle"))
@@ -182,11 +174,28 @@ class AppRuntime(QObject):
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="polyvoice Windows tray app")
     parser.add_argument("--dry-wizard", action="store_true", help="show the wizard without blocking on the finish hotkey test")
+    parser.add_argument("--tts-test", help="speak a phrase using the configured TTS route and exit")
+    parser.add_argument("--scan-wsl-vocab", action="store_true", help="scan WSL Claude Code history and exit")
     args = parser.parse_args(argv)
 
     first_run = config_module.first_run()
     cfg = config_module.load_config()
     logging_setup.setup_logging(str(cfg.data.get("log_level", "INFO")))
+
+    if args.tts_test is not None:
+        result = TTSClient(cfg).speak_blocking(args.tts_test)
+        if not result.ok:
+            print(result.message or "TTS failed", file=sys.stderr)
+            return 2
+        return 0
+
+    if args.scan_wsl_vocab:
+        result = vocab.refresh_from_wsl(progress=lambda message: print(message, flush=True))
+        print(
+            f"scanned {result.messages} messages, wrote {result.curated} vocab entries "
+            f"to {result.hotwords_path}"
+        )
+        return 0
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)

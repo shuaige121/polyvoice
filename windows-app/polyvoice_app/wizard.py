@@ -29,11 +29,13 @@ from PySide6.QtWidgets import (
 )
 
 from polyvoice_app import config as config_module
+from polyvoice_app import hook_installer, vocab
 from polyvoice_app.dictation_controller import DictationController, StateChange
 from polyvoice_app.hotkey import HotkeyListener, HotkeySpec
 from polyvoice_app.paste import PasteResult
 from polyvoice_app.recorder import MicSelection, Recorder, list_microphones
 from polyvoice_app.stt import STTConfig, STTEngine
+from polyvoice_app.tts_client import TTSClient
 
 logger = logging.getLogger("polyvoice.wizard")
 
@@ -266,21 +268,33 @@ class TTSPage(QWizardPage):
         self.setTitle("Auto-speak replies")
         self.checkbox = QCheckBox("Let Claude speak responses aloud via polyvoice TTS?")
         self.hook = QCheckBox("Install Claude Code Stop hook")
+        self.test = QPushButton("Play test phrase")
         self.status = QLabel("Checking WSL polyvoice TTS at http://127.0.0.1:7891/health ...")
         layout = QVBoxLayout(self)
         layout.addWidget(self.status)
         layout.addWidget(self.checkbox)
+        layout.addWidget(self.test)
         layout.addWidget(self.hook)
         self.checkbox.setChecked(False)
         self.hook.setChecked(False)
         self.hook.setEnabled(False)
+        self.test.setEnabled(False)
+        self.test.clicked.connect(self._play_test)
 
     def initializePage(self) -> None:
         self.wizard_ref.start_worker(probe_wsl_tts, self._tts_done, self._tts_failed)
 
     def validatePage(self) -> bool:
         self.cfg.data["tts"]["enabled"] = self.checkbox.isChecked()
-        self.cfg.data["hook_installed"] = self.checkbox.isChecked() and self.hook.isChecked()
+        if self.checkbox.isChecked() and self.hook.isChecked():
+            try:
+                result = hook_installer.install_hook(self.cfg)
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.warning(self, "Hook", str(exc))
+                return False
+            self.status.setText(result.message)
+        else:
+            self.cfg.data["hook_installed"] = False
         return True
 
     def _tts_done(self, healthy: object) -> None:
@@ -288,6 +302,7 @@ class TTSPage(QWizardPage):
             self.status.setText("WSL polyvoice TTS is available.")
             self.checkbox.setEnabled(True)
             self.hook.setEnabled(True)
+            self.test.setEnabled(True)
         else:
             self._tts_failed("not healthy")
 
@@ -296,6 +311,22 @@ class TTSPage(QWizardPage):
         self.checkbox.setChecked(False)
         self.checkbox.setEnabled(False)
         self.hook.setEnabled(False)
+        self.test.setEnabled(False)
+
+    def _play_test(self) -> None:
+        self.cfg.data["tts"]["enabled"] = True
+        self.wizard_ref.start_worker(
+            lambda: TTSClient(self.cfg).speak_blocking("polyvoice TTS works"),
+            self._test_done,
+            self._tts_failed,
+        )
+        self.status.setText("Playing TTS test phrase...")
+
+    def _test_done(self, result: object) -> None:
+        if getattr(result, "ok", False):
+            self.status.setText("TTS test played.")
+        else:
+            self.status.setText(getattr(result, "message", "TTS test failed."))
 
 
 class FinishPage(QWizardPage):
@@ -500,8 +531,11 @@ def normalize_phrase(text: str) -> str:
 
 
 def has_wsl_claude_projects_hint() -> bool:
-    candidates = [
-        Path.home() / ".claude" / "projects",
-        Path("/mnt/wsl") / ".claude" / "projects",
-    ]
-    return any(path.exists() for path in candidates)
+    try:
+        return vocab.has_wsl_claude_projects()
+    except Exception:
+        candidates = [
+            Path.home() / ".claude" / "projects",
+            Path("/mnt/wsl") / ".claude" / "projects",
+        ]
+        return any(path.exists() for path in candidates)
