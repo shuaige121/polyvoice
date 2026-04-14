@@ -79,6 +79,9 @@ def probe(cfg: config_module.Config, hotkey_test_s: float = 5) -> int:
 
 
 def run_pipeline(cfg: config_module.Config) -> int:
+    if not config_module.has_hotkey(cfg):
+        print("No hotkey configured. Run python -m polyvoice_app.main to complete setup.", file=sys.stderr)
+        return 2
     recorder = Recorder(
         MicSelection(
             name=cfg.data["mic"].get("name"),
@@ -125,6 +128,8 @@ def run_pipeline(cfg: config_module.Config) -> int:
 
 
 def describe_hotkey(cfg: config_module.Config) -> str:
+    if cfg.hotkey_vk is None:
+        return "not configured"
     modifiers = "+".join(m.upper() for m in cfg.hotkey_modifiers)
     key = f"VK 0x{cfg.hotkey_vk:02X}"
     return f"{modifiers}+{key}" if modifiers else key
@@ -165,6 +170,8 @@ def _make_stt(cfg: config_module.Config) -> STTEngine:
 
 
 def _hotkey_spec(cfg: config_module.Config) -> HotkeySpec:
+    if cfg.hotkey_vk is None:
+        raise ValueError("no hotkey configured")
     return HotkeySpec(
         vk=cfg.hotkey_vk,
         modifiers=tuple(cfg.hotkey_modifiers),

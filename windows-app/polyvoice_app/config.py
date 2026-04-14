@@ -18,7 +18,7 @@ SCHEMA_VERSION = 1
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "schema_version": SCHEMA_VERSION,
-    "hotkey": {"vk": 0x70, "modifiers": ["alt"], "toggle": False},
+    "hotkey": {"vk": None, "modifiers": [], "toggle": False},
     "mic": {"name": None, "index": None},
     "stt": {
         "route": "local",
@@ -45,8 +45,9 @@ class Config:
     path: Path
 
     @property
-    def hotkey_vk(self) -> int:
-        return int(self.data["hotkey"]["vk"])
+    def hotkey_vk(self) -> int | None:
+        value = self.data["hotkey"].get("vk")
+        return int(value) if value is not None else None
 
     @property
     def hotkey_modifiers(self) -> list[str]:
@@ -74,6 +75,16 @@ def _merge_defaults(settings: dict[str, Any]) -> dict[str, Any]:
             merged[key] = value
     merged["schema_version"] = SCHEMA_VERSION
     return merged
+
+
+def first_run(path: Path | None = None) -> bool:
+    """Return true when the first-run wizard should be shown."""
+    return not (path or paths.config_path()).exists()
+
+
+def has_hotkey(settings: dict[str, Any] | Config) -> bool:
+    data = settings.data if isinstance(settings, Config) else settings
+    return data.get("hotkey", {}).get("vk") is not None
 
 
 def _backup(path: Path) -> Path:
