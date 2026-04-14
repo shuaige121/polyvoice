@@ -148,7 +148,9 @@ def create_app(config: Config | None = None) -> FastAPI:
 
 def main() -> None:
     config = load_config()
-    uvicorn.run(create_app(config), host="127.0.0.1", port=config.stt.port)
+    import os  # noqa: PLC0415
+    host = os.environ.get("POLYVOICE_HOST", "0.0.0.0")
+    uvicorn.run(create_app(config), host=host, port=config.stt.port)
 
 
 if __name__ == "__main__":
