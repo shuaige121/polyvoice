@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Callable
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -23,10 +23,27 @@ from PySide6.QtWidgets import (
 )
 
 from polyvoice_app import config as config_module
-from polyvoice_app import paths, vocab
+from polyvoice_app import hook_installer, paths, vocab
 from polyvoice_app.recorder import list_microphones
+from polyvoice_app.tts_client import TTSClient, health_check
 from polyvoice_app.tray import open_log
 from polyvoice_app.wizard import HotkeyButton, validate_hotkey_choice
+
+
+class Worker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, func: Callable[[], object]) -> None:
+        super().__init__()
+        self.func = func
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.finished.emit(self.func())
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
 
 
 class SettingsWindow(QWidget):
@@ -45,6 +62,7 @@ class SettingsWindow(QWidget):
         self.tabs.addTab(VocabTab(cfg, self.config_changed.emit), "Vocab")
         self.tabs.addTab(TTSTab(cfg, self.config_changed.emit), "TTS & Hook")
         self.tabs.addTab(AdvancedTab(cfg, self.config_changed.emit), "Advanced")
+        self._threads: list[QThread] = []
 
 
 class EngineTab(QWidget):
@@ -151,6 +169,7 @@ class VocabTab(QWidget):
         self.changed = changed
         self.count = QLabel(vocab_count_text())
         self.last_refresh = QLabel(last_refresh_text())
+        self.status = QLabel("")
         self.scan = QCheckBox("Scan WSL history")
         self.scan.setChecked(bool(cfg.data.get("vocab", {}).get("scan_wsl_history", False)))
         refresh = QPushButton("Refresh Now")
@@ -161,15 +180,30 @@ class VocabTab(QWidget):
         layout.addRow("Last refresh", self.last_refresh)
         layout.addRow("", self.scan)
         layout.addRow("", refresh)
+        layout.addRow("Status", self.status)
+        self._threads: list[QThread] = []
 
     def _save(self, checked: bool) -> None:
         self.cfg.data.setdefault("vocab", {})["scan_wsl_history"] = checked
         self.changed()
 
     def _refresh(self) -> None:
-        vocab.refresh_from_wsl()
-        self.count.setText(vocab_count_text())
-        self.last_refresh.setText(last_refresh_text())
+        thread = QThread(self)
+        worker = vocab.VocabScanWorker()
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self.status.setText)
+        worker.finished.connect(lambda _result: self.count.setText(vocab_count_text()))
+        worker.finished.connect(lambda _result: self.last_refresh.setText(last_refresh_text()))
+        worker.finished.connect(lambda result: self.status.setText(f"wrote {result.curated} entries"))
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(lambda message: self.status.setText(message))
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda: self._threads.remove(thread) if thread in self._threads else None)
+        self._threads.append(thread)
+        self.status.setText("starting WSL scan...")
+        thread.start()
 
 
 class TTSTab(QWidget):
@@ -184,7 +218,11 @@ class TTSTab(QWidget):
         self.voice.addItems(["f1"])
         self.voice.setCurrentText(str(cfg.data["tts"].get("voice", "f1")))
         self.hook = QPushButton("Install Claude Code Stop hook")
-        self.hook.clicked.connect(lambda: QMessageBox.information(self, "Hook", "Hook installation is Phase 3 scope."))
+        self.test = QPushButton("Test TTS")
+        self.status = QLabel(hook_status_text(cfg))
+        self._threads: list[QThread] = []
+        self.hook.clicked.connect(self._toggle_hook)
+        self.test.clicked.connect(self._test_tts)
         self.enabled.toggled.connect(self._save)
         self.url.editingFinished.connect(self._save)
         self.voice.currentTextChanged.connect(self._save)
@@ -192,13 +230,67 @@ class TTSTab(QWidget):
         layout.addRow("", self.enabled)
         layout.addRow("URL", self.url)
         layout.addRow("Voice", self.voice)
+        layout.addRow("", self.test)
         layout.addRow("", self.hook)
+        layout.addRow("Status", self.status)
+        self._sync_hook_button()
 
     def _save(self) -> None:
         self.cfg.data["tts"]["enabled"] = self.enabled.isChecked()
         self.cfg.data["tts"]["url"] = self.url.text().strip() or "http://127.0.0.1:7891"
         self.cfg.data["tts"]["voice"] = self.voice.currentText()
+        self.status.setText(hook_status_text(self.cfg))
+        self._sync_hook_button()
         self.changed()
+
+    def _test_tts(self) -> None:
+        self._start_worker(
+            lambda: TTSClient(self.cfg).speak_blocking("polyvoice TTS works"),
+            self._test_done,
+        )
+        self.status.setText("Playing TTS test phrase...")
+
+    def _toggle_hook(self) -> None:
+        def run() -> object:
+            if bool(self.cfg.data.get("hook_installed")):
+                return hook_installer.uninstall_hook(self.cfg)
+            return hook_installer.install_hook(self.cfg)
+
+        self._start_worker(run, self._hook_done)
+        self.status.setText("Updating Claude Code hook...")
+
+    def _sync_hook_button(self) -> None:
+        installed = bool(self.cfg.data.get("hook_installed"))
+        self.hook.setText("Uninstall Claude Code Stop hook" if installed else "Install Claude Code Stop hook")
+
+    def _start_worker(self, func: Callable[[], object], finished: Callable[[object], None]) -> None:
+        thread = QThread(self)
+        worker = Worker(func)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(finished)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(self._worker_failed)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda: self._threads.remove(thread) if thread in self._threads else None)
+        self._threads.append(thread)
+        thread.start()
+
+    def _test_done(self, result: object) -> None:
+        if getattr(result, "ok", False):
+            self.status.setText("TTS test played.")
+        else:
+            self.status.setText(getattr(result, "message", "TTS test failed."))
+
+    def _hook_done(self, result: object) -> None:
+        self.status.setText(getattr(result, "message", "Hook updated."))
+        self._sync_hook_button()
+        self.changed()
+
+    def _worker_failed(self, message: str) -> None:
+        QMessageBox.warning(self, "polyvoice", message)
+        self.status.setText(message)
 
 
 class AdvancedTab(QWidget):
@@ -270,3 +362,10 @@ def last_refresh_text() -> str:
     if not path.exists():
         return "never"
     return datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
+
+
+def hook_status_text(cfg: config_module.Config) -> str:
+    installed = "installed" if bool(cfg.data.get("hook_installed")) else "not installed"
+    url = str(cfg.data["tts"].get("url", "http://127.0.0.1:7891"))
+    healthy = "healthy" if health_check(url) else "unavailable"
+    return f"hook {installed}; TTS {healthy}"
