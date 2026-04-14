@@ -1,0 +1,33 @@
+[project]
+name = "polyvoice-windows-app"
+version = "0.1.0"
+description = "Windows push-to-talk dictation backend for polyvoice"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "shuaige121" }]
+dependencies = [
+    "numpy>=1.26",
+    "sounddevice>=0.4.6",
+    "sherpa-onnx>=1.10.0",
+    "pywin32>=306; platform_system == 'Windows'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.8"]
+
+[project.scripts]
+polyvoice-windows-cli = "polyvoice_app.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["polyvoice_app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
