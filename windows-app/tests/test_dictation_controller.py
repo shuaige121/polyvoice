@@ -62,3 +62,19 @@ def test_controller_error_branch_resets_to_idle():
 
     assert controller.wait_idle(timeout=1)
     assert controller.last_error == "no focused window"
+
+
+def test_controller_ignores_release_when_idle():
+    changes: list[tuple[str, str, str]] = []
+    controller = DictationController(
+        recorder=FakeRecorder(),
+        stt=FakeSTT(),
+        paste=lambda text: PasteResult(True),
+        error_reset_s=0.01,
+    )
+    controller.add_state_callback(lambda change: changes.append((change.old, change.new, change.event)))
+
+    controller.hotkey_release()
+
+    assert controller.state == "idle"
+    assert changes == []

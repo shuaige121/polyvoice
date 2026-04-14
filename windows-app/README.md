@@ -1,6 +1,7 @@
 # polyvoice Windows App
 
-Phase 1 implements the backend and headless CLI smoke path for the Windows app:
+Phase 2 implements the backend, first-run wizard, settings window, and system tray shell for
+the Windows app:
 
 - config, path, and rotating JSON log setup under `%LOCALAPPDATA%\polyvoice`
 - `sounddevice` microphone recording as mono int16 16 kHz PCM
@@ -10,6 +11,9 @@ Phase 1 implements the backend and headless CLI smoke path for the Windows app:
 - Win32 `RegisterHotKey` plus `GetAsyncKeyState` release polling
 - `idle -> recording -> transcribing -> pasting -> idle` dictation state machine
 - CLI probe and full pipeline mode without a GUI
+- PySide6 first-run setup wizard and post-install settings window
+- QSystemTrayIcon status/menu surface with hotkey lifecycle handling
+- Phase 2 `vocab.py` placeholder refresh that writes `%LOCALAPPDATA%\polyvoice\hotwords.txt`
 
 ## Install
 
@@ -24,6 +28,35 @@ For tests:
 ```powershell
 python -m pip install -e ".[dev]"
 python -m pytest
+```
+
+Headless CI can skip GUI validation tests explicitly:
+
+```powershell
+$env:PYVOICE_SKIP_GUI_TESTS = "1"
+python -m pytest
+```
+
+## Tray App
+
+```powershell
+python -m polyvoice_app.main
+```
+
+On first launch, the wizard runs before the tray appears. The wizard checks for WSL STT at
+`http://127.0.0.1:7892/health`, starts the Phase 1 model-download stub if WSL is unavailable,
+requires you to choose a non-default hotkey, and offers optional local vocabulary refresh and TTS.
+
+For a Windows Python 3.13 smoke run that opens the wizard without blocking on the final hotkey test:
+
+```powershell
+python -m polyvoice_app.main --dry-wizard
+```
+
+To re-trigger the wizard, remove the settings file:
+
+```powershell
+Remove-Item "$env:LOCALAPPDATA\polyvoice\settings.json"
 ```
 
 ## Probe
@@ -63,7 +96,8 @@ Default config is written to:
 %LOCALAPPDATA%\polyvoice\settings.json
 ```
 
-Default hotkey is `ALT+F1` (`vk: 0x70`).
+No hotkey is configured by default. The wizard requires an explicit key choice and validates it
+with `RegisterHotKey` before saving.
 
 ## Notes
 
