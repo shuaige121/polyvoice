@@ -12,6 +12,13 @@ from polyvoice.server.audio import pcm_to_b64
 
 os.environ.setdefault("NUMBA_LOG_LEVEL", "WARNING")
 logging.getLogger().setLevel(logging.WARNING)
+# Real unbuffered stdout — flush=True alone still goes through TextIOWrapper.
+# write_through=True bypasses internal buffering so JSON lines reach the
+# parent process immediately, shaving tens of ms off first-chunk latency.
+try:
+    sys.stdout.reconfigure(write_through=True, line_buffering=True)
+except (AttributeError, ValueError):
+    pass
 
 MAX_PCM_FRAME = 24_000
 

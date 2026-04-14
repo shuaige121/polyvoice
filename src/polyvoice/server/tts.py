@@ -122,10 +122,13 @@ def create_app(config: Config | None = None) -> FastAPI:
         worker = state.require_worker()
 
         async def body() -> AsyncIterator[bytes]:
+            import asyncio  # noqa: PLC0415
             yield streaming_wav_header(worker.sample_rate)
+            await asyncio.sleep(0)  # let header flush before waiting on worker
             async for frame in worker.stream("speak", text=text, voice=voice, speed=req.speed):
                 if "chunk" in frame:
                     yield b64_to_pcm(str(frame["chunk"]))
+                    await asyncio.sleep(0)  # yield each PCM chunk immediately
 
         return StreamingResponse(body(), media_type="audio/wav")
 

@@ -82,3 +82,25 @@ class CosyVoice3Backend:
             load_vllm=False,
             fp16=bool(self.options.get("fp16", True)),
         )
+        self._warmup()
+
+    def _warmup(self) -> None:
+        """Run a tiny synthesis at startup so the first real request avoids
+        cold-start cost (CUDA kernel JIT, weight pages into VRAM, frontend
+        cache warmup). Output is discarded.
+        """
+        try:
+            voices = self.list_voices()
+            if not voices:
+                return
+            wav, prompt_text = self._voice_pair(voices[0])
+            for _ in self._engine.inference_zero_shot(  # type: ignore[union-attr]
+                "你好",
+                prompt_text,
+                str(wav),
+                stream=True,
+                speed=1.0,
+            ):
+                pass
+        except Exception:  # noqa: BLE001
+            pass  # warmup failures are non-fatal
