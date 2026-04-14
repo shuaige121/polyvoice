@@ -122,6 +122,21 @@ def create_app(config: Config | None = None) -> FastAPI:
             )
         except WorkerError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # Post-process: SenseVoice has no native hotword biasing, so we apply
+        # variant-based substitution against the configured hotwords file.
+        from polyvoice.vocab.postprocess import (
+            apply_hotwords,
+            load_hotwords,
+            load_master_aliases,
+        )
+
+        configured = [phrase for phrase, _ in load_hotwords(state.config.stt.hotwords_file)]
+        merged = list(dict.fromkeys(configured + hotwords))
+        if merged:
+            master_path = state.config.stt.hotwords_file.parent.parent / "master.jsonl"
+            aliases_map = load_master_aliases(master_path)
+            text_in = str(result.get("text", ""))
+            result["text"] = apply_hotwords(text_in, merged, aliases_map)
         if response_format == "text":
             return PlainTextResponse(str(result.get("text", "")))
         if response_format != "json":
